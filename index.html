@@ -59,6 +59,11 @@ button{font-family:'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-
 .navctl{display:flex;gap:8px;}
 .ctlbtn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;}
 .ctlbtn:disabled{opacity:.35;cursor:not-allowed;}
+#lbOverlay{position:fixed;inset:0;background:rgba(5,8,12,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:50;display:none;align-items:center;justify-content:center;padding:20px;}
+#lbOverlay.show{display:flex;}
+#lbCard{background:linear-gradient(180deg,var(--panel),#0e1420);border:1px solid var(--line);border-radius:18px;padding:26px 22px;max-width:460px;width:100%;max-height:80vh;overflow-y:auto;position:relative;}
+#lbCard .close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+.lbRow{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:15px;}
 @media (hover:hover) and (pointer:fine){
 .ctlbtn:hover{border-color:var(--amber);}
 }
@@ -155,13 +160,6 @@ td{color:var(--text);}
 
 #joinRoot{max-width:480px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;}
 #joinTopbar{display:flex;align-items:center;gap:10px;padding:calc(14px + env(safe-area-inset-top)) 20px 14px;border-bottom:1px solid var(--line);background:#0c111a;position:sticky;top:0;z-index:5;}
-.lbTopBtn{margin-left:auto;background:var(--panel2);border:1px solid var(--amber-dim);color:var(--amber);font-size:11px;font-weight:700;padding:7px 12px;border-radius:16px;font-family:'JetBrains Mono','Courier New',monospace;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
-#lbOverlay{position:fixed;inset:0;background:rgba(5,8,12,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:50;display:none;align-items:center;justify-content:center;padding:20px;}
-#lbOverlay.show{display:flex;}
-#lbCard{background:linear-gradient(180deg,var(--panel),#0e1420);border:1px solid var(--line);border-radius:18px;padding:26px 22px;max-width:420px;width:100%;max-height:80vh;overflow-y:auto;position:relative;}
-#lbCard .close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
-.lbRow{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;}
-.lbRow.me{color:var(--amber);font-weight:700;}
 #joinTopbar .dot{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);flex:0 0 auto;}
 #joinTopbar .name{font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;color:var(--muted);letter-spacing:.06em;}
 #joinBody{flex:1;padding:24px 20px calc(40px + env(safe-area-inset-bottom));display:flex;flex-direction:column;}
@@ -1772,11 +1770,13 @@ function buildPresenterQuiz(quizSet,title){
           <button class="ctlbtn primary" id="btnStart">▶ Start Quiz</button>
           <button class="ctlbtn" id="btnPrevQ">← Prev</button>
           <button class="ctlbtn" id="btnNextQ">Next →</button>
-          <button class="ctlbtn" id="btnFinish">🏆 Leaderboard</button>
+          <button class="ctlbtn" id="btnLeaderboard">🏆 Leaderboard</button>
+          <button class="ctlbtn primary" id="btnEndQuiz" style="display:none">✓ End Quiz for Everyone</button>
         </div>
       </div>
     </div>
     <div id="quizPresenterBody"></div>
+    <div id="lbOverlay"><div id="lbCard"><span class="close" id="lbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Current Top 10</h2><div id="lbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>
   </div>`);
 
   const statusEl=wrap.querySelector('#roomStatus');
@@ -1797,6 +1797,8 @@ function buildPresenterQuiz(quizSet,title){
     statusEl.innerHTML=`Session <strong style="color:var(--text)">${room.sessionTag}</strong> · Phase: <strong style="color:var(--text)">${room.phase}</strong> · ${parts.length} joined`;
     const nextBtnEl=wrap.querySelector('#btnNextQ');
     if(nextBtnEl) nextBtnEl.disabled = room.qIndex>=bank.length-1 || room.phase==='ended';
+    const endBtnEl=wrap.querySelector('#btnEndQuiz');
+    if(endBtnEl) endBtnEl.style.display = (room.qIndex>=bank.length-1 && room.phase!=='ended') ? 'inline-block' : 'none';
     const q=bank[room.qIndex]||bank[0];
     const qKey='q'+room.qIndex;
 
@@ -1841,9 +1843,8 @@ function buildPresenterQuiz(quizSet,title){
     room.qIndex=room.qIndex+1;room.phase='question';room.startedAt=Date.now(); await setRoom(room); refresh();
   };
   wrap.querySelector('#btnPrevQ').onclick=async()=>{ const room=await getRoom(); room.qIndex=Math.max(0,room.qIndex-1);room.phase='question';room.startedAt=Date.now(); await setRoom(room); refresh(); };
-  wrap.querySelector('#btnFinish').onclick=async()=>{
-    const room=await getRoom(); room.phase='ended'; await setRoom(room);
-    const parts=await listParticipants(room.sessionTag);
+  async function computeTop10(sessionTag){
+    const parts=await listParticipants(sessionTag);
     const scored=parts.map(p=>{
       let correct=0, times=[];
       bank.forEach((q,i)=>{
@@ -1853,16 +1854,33 @@ function buildPresenterQuiz(quizSet,title){
         if(rt!==null) times.push(rt);
       });
       const avgRt=times.length?times.reduce((a,b)=>a+b,0)/times.length:9e9;
-      return {name:p.name||'Unnamed', correct, pct:Math.round(correct/bank.length*100), avgRt};
+      return {name:p.name||'Unnamed', correct, pct:bank.length?Math.round(correct/bank.length*100):0, avgRt};
     }).sort((a,b)=> b.correct-a.correct || a.avgRt-b.avgRt);
-    const top10=scored.slice(0,10);
-    bodyEl.innerHTML=`<div class="card">
-      <h3>🏆 Leaderboard — Top ${top10.length}</h3>
-      <table><thead><tr><th>Rank</th><th>Name</th><th>Score</th><th>Accuracy</th></tr></thead>
-      <tbody>${top10.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name}</td><td>${p.correct} pts</td><td>${p.pct}%</td></tr>`).join('')}</tbody>
-      </table>
-      <p style="margin-top:10px;font-size:12px;color:var(--muted)">${scored.length} participants scored — from actual submitted answers. Each participant also sees this same ranking on their own phone.</p>
-    </div>`;
+    return {scored, top10:scored.slice(0,10)};
+  }
+
+  // Leaderboard is a peek-anytime overlay — it never touches bodyEl/refresh(),
+  // so opening or closing it cannot disturb the current question, its running
+  // timer, or the presenter's place in the quiz.
+  wrap.querySelector('#btnLeaderboard').onclick=async()=>{
+    const overlay=wrap.querySelector('#lbOverlay');
+    const lbBody=wrap.querySelector('#lbBody');
+    overlay.classList.add('show');
+    lbBody.innerHTML='<p style="text-align:center;color:var(--muted)">Loading…</p>';
+    const room=await getRoom();
+    if(!room){ lbBody.innerHTML='<p style="text-align:center;color:var(--danger)">Couldn\'t load standings right now.</p>'; return; }
+    const {scored, top10}=await computeTop10(room.sessionTag);
+    lbBody.innerHTML=`<table><thead><tr><th>Rank</th><th>Name</th><th>Points</th></tr></thead>
+      <tbody>${top10.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name}</td><td>${p.correct} PTS</td></tr>`).join('')}</tbody></table>
+      <p style="margin-top:10px;font-size:12px;color:var(--muted)">${scored.length} participants scored so far — from actual submitted answers.</p>`;
+  };
+  wrap.querySelector('#lbCloseBtn').onclick=()=>{ wrap.querySelector('#lbOverlay').classList.remove('show'); };
+
+  // Ending the quiz is now a distinct, explicit action — separate from
+  // peeking at the Leaderboard — so presenters can check standings at any
+  // point without accidentally closing the quiz for participants.
+  wrap.querySelector('#btnEndQuiz').onclick=async()=>{
+    const room=await getRoom(); room.phase='ended'; await setRoom(room); refresh();
   };
   refresh();
   const t=setInterval(refresh,1000);
@@ -1878,7 +1896,7 @@ function startJoinMode(){
   document.getElementById('stage').style.display='none';
   const root=document.getElementById('joinRoot');
   root.style.display='flex';
-  root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span><button type="button" id="lbOpenBtn" class="lbTopBtn">🏆 Leaderboard</button></div><div id="joinBody"></div><div id="lbOverlay"><div id="lbCard"><span class="close" id="lbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2><div id="lbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>`;
+  root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span></div><div id="joinBody"></div>`;
   const body=document.getElementById('joinBody');
   clientId='c'+Math.random().toString(36).slice(2,10);
 
@@ -1896,42 +1914,6 @@ function startJoinMode(){
   }
 
   let hasJoined=false;
-
-  function renderBoardRows(board){
-    if(!board.length) return '<p style="text-align:center;color:var(--muted)">No scores yet.</p>';
-    const top10=board.slice(0,10);
-    const myIdx=board.findIndex(r=>r.id===clientId);
-    let html=top10.map((r,i)=>`<div class="lbRow${r.id===clientId?' me':''}"><span>${i+1}. ${r.name}</span><span>${r.correct} pts · ${r.pct}%</span></div>`).join('');
-    if(myIdx>=10){
-      const me=board[myIdx];
-      html+=`<div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);text-align:center">
-        <div class="eyebrow">YOUR POSITION</div>
-        <div style="font-family:'JetBrains Mono','Courier New',monospace;font-size:22px;color:var(--amber);font-weight:700">#${myIdx+1}</div>
-        <div style="color:var(--text)">${me.correct} points</div>
-      </div>`;
-    }
-    return html;
-  }
-
-  async function openLeaderboard(){
-    const overlay=document.getElementById('lbOverlay');
-    const lbBody=document.getElementById('lbBody');
-    overlay.classList.add('show');
-    lbBody.innerHTML='<p style="text-align:center;color:var(--muted)">Loading…</p>';
-    const room=await getRoom();
-    if(!room){ lbBody.innerHTML='<p style="text-align:center;color:var(--danger)">Couldn\'t load standings right now.</p>'; return; }
-    const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
-    const allParts=await listParticipants(room.sessionTag);
-    const board=allParts.map(p=>computeParticipantResult(p,bank)).sort((a,b)=> b.correct-a.correct || (a.avgRt||9e9)-(b.avgRt||9e9) );
-    lbBody.innerHTML=renderBoardRows(board);
-    debugLog(`LEADERBOARD OVERLAY OPENED — ${board.length} participants, current standings shown`);
-  }
-  document.getElementById('lbOpenBtn').onclick=openLeaderboard;
-  document.getElementById('lbCloseBtn').onclick=()=>{ document.getElementById('lbOverlay').classList.remove('show'); };
-  // Note: opening/closing this overlay never touches body.innerHTML, so the
-  // active question, its countdown interval, and any locked answer are
-  // completely undisturbed underneath it.
-
 
   // Restore identity after a refresh/reconnect so a returning participant
   // resumes as the SAME participant instead of losing their answers.
@@ -2182,7 +2164,7 @@ function startJoinMode(){
     debugLog('ANALYSIS LOADED');
 
     let screenIdx=0;
-    const screens=['completion','results','analysis','leaderboard','recap'];
+    const screens=['completion','results','analysis','recap'];
 
     function renderScreen(){
       const s=screens[screenIdx];
@@ -2218,9 +2200,6 @@ function startJoinMode(){
         ${strength?`<div class="qcard" style="margin-top:12px"><div class="eyebrow">STRONGEST AREA</div><p style="color:var(--text)">${strength.c} — ${strength.pct}%</p></div>`:''}
         ${improve&&improve.c!==strength.c?`<div class="qcard" style="margin-top:12px"><div class="eyebrow">AREA TO IMPROVE</div><p style="color:var(--text)">${improve.c} — ${improve.pct}%</p></div>`:''}
         ${navBtns}`;
-      } else if(s==='leaderboard'){
-        body.innerHTML=`<div class="logo"><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2></div>
-        <div class="qcard">${renderBoardRows(board)}</div>${navBtns}`;
       } else if(s==='recap'){
         body.innerHTML=`<div class="logo"><div class="eyebrow">QUIZ RECAP</div><h2>Question by Question</h2></div>
         ${me.perQ.map(pq=>`<div class="qcard" style="margin-bottom:10px">
