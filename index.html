@@ -59,10 +59,10 @@ button{font-family:'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-
 .navctl{display:flex;gap:8px;}
 .ctlbtn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;}
 .ctlbtn:disabled{opacity:.35;cursor:not-allowed;}
-#lbOverlay{position:fixed;inset:0;background:rgba(5,8,12,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:50;display:none;align-items:center;justify-content:center;padding:20px;}
-#lbOverlay.show{display:flex;}
-#lbCard{background:linear-gradient(180deg,var(--panel),#0e1420);border:1px solid var(--line);border-radius:18px;padding:26px 22px;max-width:460px;width:100%;max-height:80vh;overflow-y:auto;position:relative;}
-#lbCard .close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;}
+#presenterLbOverlay{position:absolute;inset:0;background:rgba(5,8,12,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:50;display:none;align-items:center;justify-content:center;padding:20px;}
+#presenterLbOverlay.show{display:flex;}
+#presenterLbCard{background:linear-gradient(180deg,var(--panel),#0e1420);border:1px solid var(--line);border-radius:18px;padding:26px 22px;max-width:460px;width:100%;max-height:80vh;overflow-y:auto;position:relative;}
+#presenterLbCard .close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .lbRow{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:15px;}
 @media (hover:hover) and (pointer:fine){
 .ctlbtn:hover{border-color:var(--amber);}
@@ -313,6 +313,7 @@ td{color:var(--text);}
   <div id="railOverlay"></div>
   <div id="cardBackdrop"></div>
   <div id="cardLayer"></div>
+  <div id="presenterLbOverlay"><div id="presenterLbCard"><span class="close" id="presenterLbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Current Top 10</h2><div id="presenterLbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>
 </div>
 </div>
 
@@ -1106,6 +1107,8 @@ function goTo(i){
   if(bd) bd.classList.remove('show');
   const cl=document.getElementById('cardLayer');
   if(cl) cl.innerHTML='';
+  const plb=document.getElementById('presenterLbOverlay');
+  if(plb) plb.classList.remove('show');
   const cEl=document.getElementById('content');
   if(cEl._cleanup) try{cEl._cleanup();}catch(e){}
   currentIdx=Math.max(0,Math.min(MODULES.length-1,i));
@@ -1749,9 +1752,7 @@ function buildPresenterQuiz(quizSet,title){
   const joinUrl=location.origin+location.pathname+'?mode=join';
   const qrCard = isDeployed
     ? `<div class="qrlabel">SCAN TO TAKE THE QUIZ</div>
-       <div class="qrbox-real">${QRSvg(joinUrl,'M',180)}</div>
-       <div class="qrfallback">${joinUrl}</div>
-       <p style="font-size:11px">This link never changes — reuse the same code every session.</p>`
+       <div class="qrbox-real">${QRSvg(joinUrl,'M',320)}</div>`
     : `<strong style="color:var(--text);font-size:13px">QR not active in preview</strong>
        <p style="font-size:11px;margin-top:6px">No real web address yet — this works once the file is hosted online.</p>`;
   const wrap=el(`<div>
@@ -1759,11 +1760,10 @@ function buildPresenterQuiz(quizSet,title){
     <h2>Live Quiz</h2>
     <p style="font-size:11px;color:var(--amber);font-family:'JetBrains Mono','Courier New',monospace;letter-spacing:.05em">PRESENTER-ONLY · SKIP VIA THE SIDEBAR IF REVIEWING SOLO</p>
     ${!FIREBASE_CONFIGURED?`<div class="banner danger">⚠ Live sync isn't set up yet — participants can join the join screen, but their answers won't reach this screen until a Firebase Realtime Database URL is added to the code (see the comment above FIREBASE_DB_URL near the top of the script).</div>`:''}
-    <div class="grid grid2" style="margin-bottom:16px">
-      <div class="card">
-        ${qrCard}
-      </div>
-      <div class="card">
+    <div class="card" style="text-align:center;margin-bottom:16px">
+      ${qrCard}
+    </div>
+    <div class="card" style="margin-bottom:16px">
         <div id="roomStatus" style="font-family:'JetBrains Mono','Courier New',monospace;color:var(--cyan)">Loading room...</div>
         <div class="navctl" style="margin-top:14px;flex-wrap:wrap">
           <button class="ctlbtn" id="btnNewSession">↻ New Session</button>
@@ -1773,10 +1773,8 @@ function buildPresenterQuiz(quizSet,title){
           <button class="ctlbtn" id="btnLeaderboard">🏆 Leaderboard</button>
           <button class="ctlbtn primary" id="btnEndQuiz" style="display:none">✓ End Quiz for Everyone</button>
         </div>
-      </div>
     </div>
     <div id="quizPresenterBody"></div>
-    <div id="lbOverlay"><div id="lbCard"><span class="close" id="lbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Current Top 10</h2><div id="lbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>
   </div>`);
 
   const statusEl=wrap.querySelector('#roomStatus');
@@ -1811,6 +1809,12 @@ function buildPresenterQuiz(quizSet,title){
     const max=Math.max(1,...counts);
     const isReveal=room.phase==='reveal';
     const newReveal = isReveal && revealedFor!==room.qIndex;
+    if(isReveal && !newReveal){
+      // Already rendered this reveal in full — skip rebuilding the DOM so the
+      // correct/wrong indicators, bar fills, and explanation stay put instead
+      // of resetting and re-animating every second from the refresh loop.
+      return;
+    }
     if(isReveal) revealedFor=room.qIndex;
     const remain=room.phase==='question'?Math.max(0,20-Math.floor((Date.now()-room.startedAt)/1000)):0;
 
@@ -1863,8 +1867,8 @@ function buildPresenterQuiz(quizSet,title){
   // so opening or closing it cannot disturb the current question, its running
   // timer, or the presenter's place in the quiz.
   wrap.querySelector('#btnLeaderboard').onclick=async()=>{
-    const overlay=wrap.querySelector('#lbOverlay');
-    const lbBody=wrap.querySelector('#lbBody');
+    const overlay=document.getElementById('presenterLbOverlay');
+    const lbBody=document.getElementById('presenterLbBody');
     overlay.classList.add('show');
     lbBody.innerHTML='<p style="text-align:center;color:var(--muted)">Loading…</p>';
     const room=await getRoom();
@@ -1874,7 +1878,7 @@ function buildPresenterQuiz(quizSet,title){
       <tbody>${top10.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name}</td><td>${p.correct} PTS</td></tr>`).join('')}</tbody></table>
       <p style="margin-top:10px;font-size:12px;color:var(--muted)">${scored.length} participants scored so far — from actual submitted answers.</p>`;
   };
-  wrap.querySelector('#lbCloseBtn').onclick=()=>{ wrap.querySelector('#lbOverlay').classList.remove('show'); };
+  document.getElementById('presenterLbCloseBtn').onclick=()=>{ document.getElementById('presenterLbOverlay').classList.remove('show'); };
 
   // Ending the quiz is now a distinct, explicit action — separate from
   // peeking at the Leaderboard — so presenters can check standings at any
