@@ -162,6 +162,11 @@ td{color:var(--text);}
 .qopt-reveal.rv-correct .rv-tag{color:#22c55e;}
 .qopt-reveal.rv-wrong .rv-tag{color:var(--danger);}
 #timesUpMsg{text-align:center;margin-top:14px;color:var(--amber);font-family:'JetBrains Mono','Courier New',monospace;font-size:13px;font-weight:700;letter-spacing:.04em;}
+.timerbig.t-green{color:#22c55e;}
+.timerbig.t-amber{color:var(--amber);}
+.timerbig.t-red{color:var(--danger);}
+.timerbig.t-pulse{animation:pulseTimer .6s ease-in-out infinite;font-weight:800;}
+@keyframes pulseTimer{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(1.14);opacity:.72;}}
 .yourans{text-align:center;font-size:14px;color:var(--muted);margin-top:6px;}
 .yourans b{color:var(--text);}
 
@@ -1688,23 +1693,24 @@ async function fbGet(path){
   }catch(e){ return null; }
 }
 async function fbSet(path, value){
-  if(!FIREBASE_CONFIGURED) return;
+  if(!FIREBASE_CONFIGURED) return false;
   try{
-    await fetch(`${FIREBASE_DB_URL}/${path}.json`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(value)});
-  }catch(e){}
+    const r = await fetch(`${FIREBASE_DB_URL}/${path}.json`, {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(value)});
+    return r.ok;
+  }catch(e){ return false; }
 }
 
 let clientId=null, clientName=null;
 
 async function getRoom(){ return await fbGet('room'); }
-async function setRoom(obj){ await fbSet('room', obj); }
+async function setRoom(obj){ return await fbSet('room', obj); }
 async function listParticipants(sessionTag){
   const data = await fbGet(`participants/${fbKey(sessionTag)}`);
   if(!data) return [];
   return Object.values(data);
 }
-async function setParticipant(sessionTag,id,data){ await fbSet(`participants/${fbKey(sessionTag)}/${fbKey(id)}`, data); }
-async function saveScore(sessionTag,id,quizSet,data){ await fbSet(`scores/${fbKey(sessionTag)}/${fbKey(id)}/${quizSet}`, data); }
+async function setParticipant(sessionTag,id,data){ return await fbSet(`participants/${fbKey(sessionTag)}/${fbKey(id)}`, data); }
+async function saveScore(sessionTag,id,quizSet,data){ return await fbSet(`scores/${fbKey(sessionTag)}/${fbKey(id)}/${quizSet}`, data); }
 
 function buildPresenterQuiz(quizSet,title){
   const bank=quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
@@ -1750,8 +1756,11 @@ function buildPresenterQuiz(quizSet,title){
       room={quizSet,sessionTag:(room&&room.sessionTag)||('S'+Date.now()),phase:'lobby',qIndex:0,startedAt:0};
       await setRoom(room);
     }
-    if(room.phase==='question' && Date.now()-room.startedAt>=20000){ room.phase='reveal'; await setRoom(room); }
     const parts=await listParticipants(room.sessionTag);
+    const qKeyNow='q'+room.qIndex;
+    const answeredNow=parts.filter(p=>p.answers&&p.answers[qKeyNow]!==undefined).length;
+    const allAnswered=parts.length>0 && answeredNow>=parts.length;
+    if(room.phase==='question' && (Date.now()-room.startedAt>=20000 || allAnswered)){ room.phase='reveal'; await setRoom(room); }
     statusEl.innerHTML=`Session <strong style="color:var(--text)">${room.sessionTag}</strong> · Phase: <strong style="color:var(--text)">${room.phase}</strong> · ${parts.length} joined`;
     const q=bank[room.qIndex]||bank[0];
     const qKey='q'+room.qIndex;
@@ -1779,7 +1788,7 @@ function buildPresenterQuiz(quizSet,title){
           <span class="count">${counts[oi]} response${counts[oi]===1?'':'s'}${total?' — '+Math.round(counts[oi]/total*100)+'%':''}</span>
         </div>`).join('')}
       </div>
-      <div class="totalresp">${total} TOTAL RESPONSE${total===1?'':'S'}</div>
+      <div class="totalresp">${total} TOTAL RESPONSE${total===1?'':'S'}${isReveal&&parts.length>total?` · ${parts.length-total} DID NOT ANSWER`:''}</div>
       ${isReveal?`<div class="explain" id="explainBox"><div class="banner">✓ Correct answer: <strong>${q.opts[q.c]}</strong> — ${q.why}</div></div>`:''}
     `;
     if(isReveal){
@@ -1894,31 +1903,74 @@ function startJoinMode(){
     <p style="text-align:center">You're in. Watch the front screen — your trainer will start the first question shortly.</p>`;
   }
 
-  let countdownTimer=null, myPicked=null;
+  let countdownTimer=null, myPicked=null, submitting=false, waitPollTimer=null;
   function screenQuestion(room){
     if(countdownTimer)clearInterval(countdownTimer);
-    myPicked=null;
+    if(waitPollTimer){clearInterval(waitPollTimer);waitPollTimer=null;}
+    myPicked=null; submitting=false;
     const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
     const q=bank[room.qIndex];
     body.innerHTML=`
       <div class="eyebrow" style="text-align:center;display:block">QUESTION ${room.qIndex+1} OF ${bank.length}</div>
-      <div class="timerbig" id="ptimer">00:20</div>
+      <div class="timerbig t-green" id="ptimer">00:20</div>
       <div class="qcard">
         <h3 style="text-align:center;font-size:21px;margin-bottom:16px">${q.q}</h3>
         <div id="optsWrap">${q.opts.map((o,i)=>`<button class="qopt" data-i="${i}">${String.fromCharCode(65+i)}. ${o}</button>`).join('')}</div>
+        <div id="submitStatus"></div>
       </div>
     `;
+
+    function showWaitingState(){
+      if(waitPollTimer)clearInterval(waitPollTimer);
+      body.innerHTML=`
+        <div class="logo"><div class="eyebrow">ANSWER SUBMITTED ✓</div><h2>Waiting for results…</h2></div>
+        <p id="waitCount" style="text-align:center;color:var(--muted)">Checking responses…</p>`;
+      async function pollWaiting(){
+        const r2=await getRoom();
+        if(!r2 || r2.phase!=='question' || r2.qIndex!==room.qIndex){ clearInterval(waitPollTimer); return; }
+        const parts=await listParticipants(r2.sessionTag);
+        const answered=parts.filter(p=>p.answers&&p.answers['q'+r2.qIndex]!==undefined).length;
+        const c=document.getElementById('waitCount');
+        if(c) c.textContent=`${answered}/${parts.length} participants answered`;
+      }
+      pollWaiting();
+      waitPollTimer=setInterval(pollWaiting,1000);
+    }
+
     body.querySelectorAll('.qopt').forEach(btn=>{
       btn.onclick=async()=>{
-        if(myPicked!==null)return;
-        myPicked=parseInt(btn.dataset.i);
-        body.querySelectorAll('.qopt').forEach(b=>b.classList.remove('picked'));
+        if(myPicked!==null || submitting) return;
+        submitting=true;
+        const picked=parseInt(btn.dataset.i);
+        body.querySelectorAll('.qopt').forEach(b=>{ b.disabled=true; b.classList.remove('picked'); });
         btn.classList.add('picked');
+        const statusEl2=document.getElementById('submitStatus');
+        if(statusEl2) statusEl2.innerHTML=`<div style="text-align:center;margin-top:12px;color:var(--muted);font-family:'JetBrains Mono','Courier New',monospace;font-size:12px">Submitting…</div>`;
+
         const sessionTag=room.sessionTag;
+        const responseTimeMs=Date.now()-(room.startedAt||Date.now());
         const cur=await fbGet(`participants/${fbKey(sessionTag)}/${fbKey(clientId)}`);
-        const data=cur||{id:clientId,name:clientName,answers:{}};
-        data.answers['q'+room.qIndex]=myPicked;
-        await setParticipant(sessionTag,clientId,data);
+        const data=cur||{id:clientId,name:clientName,answers:{},meta:{}};
+        if(!data.answers) data.answers={};
+        if(!data.meta) data.meta={};
+        data.answers['q'+room.qIndex]=picked;
+        data.meta['q'+room.qIndex]={
+          participantId:clientId, questionId:room.qIndex, selectedAnswer:picked,
+          submittedAt:Date.now(), correct:picked===q.c, responseTimeMs
+        };
+        let ok=await setParticipant(sessionTag,clientId,data);
+        if(!ok) ok=await setParticipant(sessionTag,clientId,data); // one retry
+        submitting=false;
+
+        if(ok){
+          myPicked=picked;
+          if(countdownTimer)clearInterval(countdownTimer);
+          showWaitingState();
+        } else {
+          body.querySelectorAll('.qopt').forEach(b=>{ b.disabled=false; });
+          btn.classList.remove('picked');
+          if(statusEl2) statusEl2.innerHTML=`<div style="text-align:center;margin-top:12px;color:var(--danger);font-size:12px">Couldn't submit — check your connection and tap an answer again.</div>`;
+        }
       };
     });
     const started=room.startedAt||Date.now();
@@ -1926,12 +1978,20 @@ function startJoinMode(){
       const elapsed=Math.floor((Date.now()-started)/1000);
       const remain=Math.max(0,20-elapsed);
       const t=document.getElementById('ptimer');
-      if(t)t.textContent='00:'+String(remain).padStart(2,'0');
+      if(t){
+        t.textContent='00:'+String(remain).padStart(2,'0');
+        t.classList.remove('t-green','t-amber','t-red','t-pulse');
+        if(remain<=4) t.classList.add('t-red','t-pulse');
+        else if(remain<=9) t.classList.add('t-amber');
+        else t.classList.add('t-green');
+      }
       if(remain<=0){
         clearInterval(countdownTimer);
-        body.querySelectorAll('.qopt').forEach(b=>b.disabled=true);
-        if(!document.getElementById('timesUpMsg')){
-          body.appendChild(el('<div id="timesUpMsg">TIME\'S UP — WAITING FOR REVEAL...</div>'));
+        if(myPicked===null){
+          body.querySelectorAll('.qopt').forEach(b=>b.disabled=true);
+          if(!document.getElementById('timesUpMsg')){
+            body.appendChild(el('<div id="timesUpMsg">TIME\'S UP — WAITING FOR REVEAL...</div>'));
+          }
         }
       }
     },250);
@@ -1939,6 +1999,7 @@ function startJoinMode(){
 
   async function screenReveal(room){
     if(countdownTimer)clearInterval(countdownTimer);
+    if(waitPollTimer){clearInterval(waitPollTimer);waitPollTimer=null;}
     const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
     const q=bank[room.qIndex];
     const cur=await fbGet(`participants/${fbKey(room.sessionTag)}/${fbKey(clientId)}`);
@@ -1961,6 +2022,7 @@ function startJoinMode(){
   }
 
   async function screenEnded(room){
+    if(waitPollTimer){clearInterval(waitPollTimer);waitPollTimer=null;}
     const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
     const r=await fbGet(`scores/${fbKey(room.sessionTag)}/${fbKey(clientId)}/${room.quizSet}`);
     const pct=r?r.pct:null;
