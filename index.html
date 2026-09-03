@@ -1761,6 +1761,18 @@ async function saveScore(sessionTag,id,quizSet,data){ return await fbSet(`scores
 function buildPresenterQuiz(quizSet,title){
   const bank=quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
   const isDeployed = /^https?:$/.test(location.protocol) && location.hostname && location.hostname!=='localhost';
+  const isLocalFile = location.protocol==='file:';
+  if(isLocalFile || !navigator.onLine){
+    return el(`<div>
+      <div class="eyebrow">${title}</div>
+      <h2>Live Quiz</h2>
+      <div class="banner" style="max-width:480px;margin-top:16px">
+        <strong style="color:var(--text)">This feature needs an internet connection.</strong><br>
+        The Live Quiz syncs answers between phones in real time, so it can't run from an offline file or without a network connection.<br><br>
+        Everything else in this training works fully offline — this is the only page that needs to be online.
+      </div>
+    </div>`);
+  }
   const joinUrl=location.origin+location.pathname+'?mode=join';
   const qrCard = isDeployed
     ? `<div class="qrlabel">SCAN TO TAKE THE QUIZ</div>
@@ -1931,6 +1943,11 @@ function startJoinMode(){
   root.style.display='flex';
   root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span></div><div id="joinBody"></div>`;
   const body=document.getElementById('joinBody');
+  if(location.protocol==='file:' || !navigator.onLine){
+    body.innerHTML=`<div class="logo"><div class="eyebrow">NO CONNECTION</div><h2>This needs an internet connection</h2></div>
+      <p style="text-align:center">The live quiz syncs with everyone else's phones in real time, so it can't run offline. Please connect to the internet and scan the QR code again.</p>`;
+    return;
+  }
   clientId='c'+Math.random().toString(36).slice(2,10);
 
   function debugLog(msg){ console.log('[ILG QUIZ]', new Date().toLocaleTimeString(), '—', msg); }
