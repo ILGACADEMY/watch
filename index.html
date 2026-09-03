@@ -1068,16 +1068,16 @@ const OPEN_QUIZ = [
   {q:'Spring Drive is best described as:',opts:['Pure quartz','Mechanical power + quartz regulation','Pure mechanical','Solar-charged capacitor'],c:1,tag:'Movement',why:'The wound mainspring drives the gear train directly; a quartz-controlled regulator sets the speed.'},
 ];
 const CLOSE_QUIZ = [
-  {q:'A kinetic movement is best described as:',opts:['Mechanical power driving hands directly','Pure mechanical, no electronics','Automatic electricity generation + quartz movement','Solar cell with no moving parts'],c:2,tag:'Movement',why:'The rotor charges a capacitor, which powers a conventional quartz movement.'},
-  {q:'What should you say instead of "scratch-proof"?',opts:['"Highly scratch-resistant"','"Indestructible"','"Never scratches"','"Diamond-coated"'],c:0,tag:'Crystals',why:'Sapphire resists scratches very well but is never truly scratch-proof.'},
-  {q:'What\'s the safe minimum rating for regular swimming?',opts:['30M','50M','10M','100M'],c:3,tag:'Water',why:'100M is the recommended minimum for regular swimming and snorkeling.'},
-  {q:'A unidirectional bezel is mainly a:',opts:['Style choice','Dive safety feature','Way to set the date','Way to change the crystal'],c:1,tag:'Terminology',why:'It only turns one way, preventing an accidental overestimate of remaining dive time.'},
-  {q:'What is a helium escape valve for?',opts:['Releasing built-up helium pressure after saturation diving','Winding the mainspring','Adjusting the date faster','Cooling the movement'],c:0,tag:'Water',why:'During long saturation dives, tiny helium molecules seep past seals; the valve releases that pressure safely during decompression.'},
-  {q:'What does COSC certify?',opts:['The case finishing','The strap material','The retail price','The movement\'s tested precision'],c:3,tag:'Movement',why:'COSC relates to the movement\'s tested accuracy, not the watch\'s overall finishing or luxury positioning.'},
-  {q:'Best line for "why is this heavier?"',opts:['"It\'s a manufacturing flaw."','"Heavier is always better."','"That\'s titanium \u2014 40% lighter than steel, actually."','"I don\'t know."'],c:2,tag:'Selling',why:'Always tie the physical difference back to material and benefit.'},
-  {q:'What does PVD stand for?',opts:['Physical Vapor Deposition','Precision Vapor Design','Platinum Vacuum Diffusion','Polished Vacuum Dial'],c:0,tag:'Materials',why:'PVD is the umbrella coating process; ion plating is the specific technique.'},
-  {q:'A power reserve indicator shows:',opts:['Battery percentage','Remaining mainspring energy','Water resistance level','Time zone offset'],c:1,tag:'Movement',why:'Especially useful for manual-wind and automatic watches.'},
-  {q:'The six complications taught today were:',opts:['Only chronograph and date','Date, GMT, Chronograph, Moon Phase, Power Reserve, Tourbillon','Only Tourbillon and Moon Phase','Minute repeater and regatta timer'],c:1,tag:'Terminology',why:'These are the six a retail advisor will actually encounter daily.'},
+  {q:'What is the outer body that holds and protects the watch components called?',opts:['Case','Strap','Crystal','Buckle'],c:0,tag:'Terminology',why:'The case is the main body that houses and protects the movement and other components.'},
+  {q:'What is the transparent cover over the dial called?',opts:['Bezel','Crystal','Crown','Lug'],c:1,tag:'Crystals',why:'The crystal is the transparent cover \u2014 usually mineral, sapphire, or acrylic \u2014 that protects the dial.'},
+  {q:'What is the small knob on the side of the watch called?',opts:['Pusher','Crown','Lug','Buckle'],c:1,tag:'Terminology',why:'The crown is the knob on the side used to wind the watch and set the time and date.'},
+  {q:'What is the ring around the crystal called?',opts:['Bezel','Crown','Caseback','Strap'],c:0,tag:'Terminology',why:'The bezel is the ring surrounding the crystal \u2014 it can be fixed, rotating, or a dive safety feature.'},
+  {q:'What are the parts that connect the strap or bracelet to the watch case called?',opts:['Lugs','Pushers','Hands','Markers'],c:0,tag:'Terminology',why:'Lugs are the small extensions on the case that the strap or bracelet attaches to via spring bars.'},
+  {q:'What is the back of the watch called?',opts:['Dial','Caseback','Bezel','Crystal'],c:1,tag:'Terminology',why:'The caseback is the rear panel of the watch \u2014 solid, snap-on, screw-down, or exhibition (see-through).'},
+  {q:'What is the non-metal band commonly made from leather, rubber or fabric called?',opts:['Strap','Lug','Crown','Pusher'],c:0,tag:'Materials',why:'A strap is a non-metal band \u2014 commonly leather, rubber, or fabric \u2014 as opposed to a metal bracelet.'},
+  {q:'What is the mechanism inside the watch that makes it work called?',opts:['Movement / calibre','Bezel','Crystal','Strap'],c:0,tag:'Movement',why:'The movement (or calibre) is the internal mechanism that powers the watch and drives the hands.'},
+  {q:'How many main types of watch movements are commonly discussed in basic watch knowledge?',opts:['2','3','5','7'],c:1,tag:'Movement',why:'The three main movement types taught in fundamentals are Quartz, Mechanical, and Spring Drive.'},
+  {q:'The 3 main types are:',opts:['Quartz, Mechanical, Spring Drive','Mechanical, Automatic, Quartz','Automatic, Hand Winding, Quartz','Automatic, Hand Winding, Solar'],c:0,tag:'Movement',why:'Quartz, Mechanical, and Spring Drive are the three core movement families covered in this training.'},
 ];
 
 /* ========================================================================
@@ -1681,9 +1681,12 @@ RENDER.done = ()=>{
   const isDeployed = /^https?:$/.test(location.protocol) && location.hostname && location.hostname!=='localhost';
   const url=location.origin+location.pathname;
   const qrBlock = isDeployed
-    ? `<div class="qrlabel">SCAN TO KEEP THIS TRAINING ON YOUR PHONE</div>
+    ? `<div class="qrlabel">SCAN TO DOWNLOAD FOR OFFLINE USE</div>
        <div class="qrbox-real">${QRSvg(url,'M',220)}</div>
-       <div class="qrfallback">Can't scan? Open this link directly:<br>${url}</div>`
+       <a href="${url}" download="ILG-Academy-Watch-Fundamentals.html" class="ctlbtn primary" style="margin-top:18px;text-decoration:none;display:inline-block">⬇ Download for Offline Use</a>
+       <p style="font-size:11px;max-width:360px;margin-top:10px">Saves this training as a file you can reopen anytime, no internet needed. On iPhone, if it just reopens the page instead of saving, use Safari's Share button → Save to Files.</p>
+       <p style="font-size:11px;color:var(--muted);max-width:360px;margin-top:6px">Everything works offline except the Live Quiz, which needs an internet connection to sync between phones.</p>
+       <div class="qrfallback" style="margin-top:14px">Can't scan? Open this link directly:<br>${url}</div>`
     : `<div class="banner" style="max-width:420px;text-align:left">
          <strong style="color:var(--text)">QR not active in preview</strong><br>
          Works once this file is hosted online — see the Welcome page for the same note.
