@@ -58,6 +58,7 @@ button{font-family:'Inter',-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-
 #topbar .sub{font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;color:var(--amber);letter-spacing:.08em;font-weight:700;}
 .navctl{display:flex;gap:8px;}
 .ctlbtn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:9px 16px;border-radius:9px;font-size:13px;font-weight:600;}
+.ctlbtn:disabled{opacity:.35;cursor:not-allowed;}
 @media (hover:hover) and (pointer:fine){
 .ctlbtn:hover{border-color:var(--amber);}
 }
@@ -154,6 +155,13 @@ td{color:var(--text);}
 
 #joinRoot{max-width:480px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;}
 #joinTopbar{display:flex;align-items:center;gap:10px;padding:calc(14px + env(safe-area-inset-top)) 20px 14px;border-bottom:1px solid var(--line);background:#0c111a;position:sticky;top:0;z-index:5;}
+.lbTopBtn{margin-left:auto;background:var(--panel2);border:1px solid var(--amber-dim);color:var(--amber);font-size:11px;font-weight:700;padding:7px 12px;border-radius:16px;font-family:'JetBrains Mono','Courier New',monospace;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+#lbOverlay{position:fixed;inset:0;background:rgba(5,8,12,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:50;display:none;align-items:center;justify-content:center;padding:20px;}
+#lbOverlay.show{display:flex;}
+#lbCard{background:linear-gradient(180deg,var(--panel),#0e1420);border:1px solid var(--line);border-radius:18px;padding:26px 22px;max-width:420px;width:100%;max-height:80vh;overflow-y:auto;position:relative;}
+#lbCard .close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+.lbRow{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;}
+.lbRow.me{color:var(--amber);font-weight:700;}
 #debugPanel{background:#000;border-top:1px solid var(--line);padding:8px 14px calc(8px + env(safe-area-inset-bottom));font-family:'JetBrains Mono','Courier New',monospace;font-size:10px;line-height:1.6;color:#5eead4;max-height:140px;overflow-y:auto;}
 #debugPanel .dbgtoggle{color:var(--amber);font-weight:700;cursor:pointer;display:block;margin-bottom:4px;-webkit-tap-highlight-color:transparent;}
 #debugPanel .dbgline{white-space:pre-wrap;word-break:break-word;border-bottom:1px solid #111;padding:2px 0;}
@@ -1791,6 +1799,8 @@ function buildPresenterQuiz(quizSet,title){
     const allAnswered=parts.length>0 && answeredNow>=parts.length;
     if(room.phase==='question' && (Date.now()-room.startedAt>=20000 || allAnswered)){ room.phase='reveal'; await setRoom(room); }
     statusEl.innerHTML=`Session <strong style="color:var(--text)">${room.sessionTag}</strong> · Phase: <strong style="color:var(--text)">${room.phase}</strong> · ${parts.length} joined`;
+    const nextBtnEl=wrap.querySelector('#btnNextQ');
+    if(nextBtnEl) nextBtnEl.disabled = room.qIndex>=bank.length-1 || room.phase==='ended';
     const q=bank[room.qIndex]||bank[0];
     const qKey='q'+room.qIndex;
 
@@ -1829,7 +1839,11 @@ function buildPresenterQuiz(quizSet,title){
   }
   wrap.querySelector('#btnNewSession').onclick=async()=>{ await setRoom({quizSet,sessionTag:'S'+Date.now(),phase:'lobby',qIndex:0,startedAt:0}); revealedFor=-1; refresh(); };
   wrap.querySelector('#btnStart').onclick=async()=>{ const room=await getRoom(); room.phase='question';room.qIndex=0;room.startedAt=Date.now(); await setRoom(room); refresh(); };
-  wrap.querySelector('#btnNextQ').onclick=async()=>{ const room=await getRoom(); room.qIndex=Math.min(bank.length-1,room.qIndex+1);room.phase='question';room.startedAt=Date.now(); await setRoom(room); refresh(); };
+  wrap.querySelector('#btnNextQ').onclick=async()=>{
+    const room=await getRoom();
+    if(room.qIndex>=bank.length-1 || room.phase==='ended'){ return; } // no path past the last question
+    room.qIndex=room.qIndex+1;room.phase='question';room.startedAt=Date.now(); await setRoom(room); refresh();
+  };
   wrap.querySelector('#btnPrevQ').onclick=async()=>{ const room=await getRoom(); room.qIndex=Math.max(0,room.qIndex-1);room.phase='question';room.startedAt=Date.now(); await setRoom(room); refresh(); };
   wrap.querySelector('#btnFinish').onclick=async()=>{
     const room=await getRoom(); room.phase='ended'; await setRoom(room);
@@ -1890,7 +1904,7 @@ function startJoinMode(){
   document.getElementById('stage').style.display='none';
   const root=document.getElementById('joinRoot');
   root.style.display='flex';
-  root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span></div><div id="joinBody"></div><div id="debugPanel"><span class="dbgtoggle" id="dbgToggle">▾ DEBUG LOG (tap to hide)</span><div class="dbglines" id="dbgLines"></div></div>`;
+  root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span><button type="button" id="lbOpenBtn" class="lbTopBtn">🏆 Leaderboard</button></div><div id="joinBody"></div><div id="debugPanel"><span class="dbgtoggle" id="dbgToggle">▾ DEBUG LOG (tap to hide)</span><div class="dbglines" id="dbgLines"></div></div><div id="lbOverlay"><div id="lbCard"><span class="close" id="lbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2><div id="lbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>`;
   const body=document.getElementById('joinBody');
   clientId='c'+Math.random().toString(36).slice(2,10);
 
@@ -1919,6 +1933,31 @@ function startJoinMode(){
   }
 
   let hasJoined=false;
+
+  function renderBoardRows(board){
+    if(!board.length) return '<p style="text-align:center;color:var(--muted)">No scores yet.</p>';
+    return board.map((r,i)=>`<div class="lbRow${r.id===clientId?' me':''}"><span>${i+1}. ${r.name}</span><span>${r.correct} pts · ${r.pct}%</span></div>`).join('');
+  }
+
+  async function openLeaderboard(){
+    const overlay=document.getElementById('lbOverlay');
+    const lbBody=document.getElementById('lbBody');
+    overlay.classList.add('show');
+    lbBody.innerHTML='<p style="text-align:center;color:var(--muted)">Loading…</p>';
+    const room=await getRoom();
+    if(!room){ lbBody.innerHTML='<p style="text-align:center;color:var(--danger)">Couldn\'t load standings right now.</p>'; return; }
+    const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
+    const allParts=await listParticipants(room.sessionTag);
+    const board=allParts.map(p=>computeParticipantResult(p,bank)).sort((a,b)=> b.correct-a.correct || (a.avgRt||9e9)-(b.avgRt||9e9) );
+    lbBody.innerHTML=renderBoardRows(board);
+    debugLog(`LEADERBOARD OVERLAY OPENED — ${board.length} participants, current standings shown`);
+  }
+  document.getElementById('lbOpenBtn').onclick=openLeaderboard;
+  document.getElementById('lbCloseBtn').onclick=()=>{ document.getElementById('lbOverlay').classList.remove('show'); };
+  // Note: opening/closing this overlay never touches body.innerHTML, so the
+  // active question, its countdown interval, and any locked answer are
+  // completely undisturbed underneath it.
+
 
   // Restore identity after a refresh/reconnect so a returning participant
   // resumes as the SAME participant instead of losing their answers.
@@ -2158,6 +2197,8 @@ function startJoinMode(){
     }
     const me=computeParticipantResult(myData,bank);
     debugLog(`RESULTS LOADED — ${me.correct}/${me.total} correct, ${me.pct}%`);
+    myData.completed=true; myData.completedAt=Date.now();
+    setParticipant(room.sessionTag,clientId,myData); // fire-and-forget completion marker; results already computed above regardless of this write's outcome
 
     const allParts=await listParticipants(room.sessionTag);
     const board=allParts.map(p=>computeParticipantResult(p,bank)).sort((a,b)=> b.correct-a.correct || (a.avgRt||9e9)-(b.avgRt||9e9) );
@@ -2205,11 +2246,7 @@ function startJoinMode(){
         ${navBtns}`;
       } else if(s==='leaderboard'){
         body.innerHTML=`<div class="logo"><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2></div>
-        <div class="qcard">
-          ${board.map((r,i)=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);${r.id===clientId?'color:var(--amber);font-weight:700':''}">
-            <span>${i+1}. ${r.name}</span><span>${r.correct} pts · ${r.pct}%</span>
-          </div>`).join('')}
-        </div>${navBtns}`;
+        <div class="qcard">${renderBoardRows(board)}</div>${navBtns}`;
       } else if(s==='recap'){
         body.innerHTML=`<div class="logo"><div class="eyebrow">QUIZ RECAP</div><h2>Question by Question</h2></div>
         ${me.perQ.map(pq=>`<div class="qcard" style="margin-bottom:10px">
