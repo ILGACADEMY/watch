@@ -1908,7 +1908,34 @@ function startJoinMode(){
   };
   debugLog(`Session started. clientId=${clientId}. UA=${navigator.userAgent.slice(0,60)}`);
 
+  let netFailCount=0;
+  function reportNetOk(){ netFailCount=0; const b=document.getElementById('netBanner'); if(b) b.remove(); }
+  function reportNetFail(){
+    netFailCount++;
+    if(netFailCount>=2 && !document.getElementById('netBanner')){
+      const tb=document.getElementById('joinTopbar');
+      if(tb) tb.insertAdjacentHTML('afterend','<div id="netBanner" style="background:rgba(255,107,107,.15);color:var(--danger);text-align:center;font-family:\'JetBrains Mono\',monospace;font-size:11px;padding:6px;">Reconnecting…</div>');
+    }
+  }
+
   let hasJoined=false;
+
+  // Restore identity after a refresh/reconnect so a returning participant
+  // resumes as the SAME participant instead of losing their answers.
+  async function tryRestoreIdentity(){
+    let saved=null;
+    try{ saved=JSON.parse(localStorage.getItem('ilg_quiz_identity')||'null'); }catch(e){}
+    if(!saved) return false;
+    const room=await getRoom();
+    if(!room || room.sessionTag!==saved.sessionTag){
+      localStorage.removeItem('ilg_quiz_identity');
+      return false;
+    }
+    clientId=saved.clientId; clientName=saved.clientName; hasJoined=true;
+    debugLog(`Restored identity after refresh — clientId=${clientId} name=${clientName}`);
+    return true;
+  }
+
   function screenName(){
     body.innerHTML=`
       <div class="logo"><div class="eyebrow">ILG ACADEMY</div><h2>Watch Fundamentals Quiz</h2></div>
@@ -1922,7 +1949,10 @@ function startJoinMode(){
       clientName=name;
       const room=await getRoom();
       const sessionTag=(room&&room.sessionTag)||'S0';
-      await setParticipant(sessionTag,clientId,{id:clientId,name,answers:{}});
+      const ok=await setParticipant(sessionTag,clientId,{id:clientId,name,answers:{},meta:{}});
+      if(!ok){ debugLog('JOIN WRITE FAILED — retrying once'); await setParticipant(sessionTag,clientId,{id:clientId,name,answers:{},meta:{}}); }
+      try{ localStorage.setItem('ilg_quiz_identity', JSON.stringify({clientId, clientName:name, sessionTag})); }catch(e){}
+      debugLog(`SESSION CONNECTED — participantId=${clientId} sessionTag=${sessionTag}`);
       hasJoined=true;
       screenWait();
     };
@@ -1932,9 +1962,10 @@ function startJoinMode(){
   async function pollLoop(){
     if(!hasJoined){ setTimeout(pollLoop,900); return; }
     const room=await getRoom();
-    if(!room){setTimeout(pollLoop,1200);return;}
+    if(!room){ reportNetFail(); setTimeout(pollLoop,1200);return; }
+    reportNetOk();
     if(room.phase==='lobby'){ if(lastSeenPhase!=='lobby') screenWait(); }
-    else if(room.phase==='question'){ if(room.qIndex!==lastSeenQ||lastSeenPhase!=='question'){ lastSeenQ=room.qIndex; screenQuestion(room); } }
+    else if(room.phase==='question'){ if(room.qIndex!==lastSeenQ||lastSeenPhase!=='question'){ lastSeenQ=room.qIndex; await screenQuestion(room); } }
     else if(room.phase==='reveal'){ if(lastSeenPhase!=='reveal'){ await screenReveal(room); } }
     else if(room.phase==='ended'){ if(lastSeenPhase!=='ended'){ await screenEnded(room); } }
     lastSeenPhase=room.phase;
@@ -1947,12 +1978,21 @@ function startJoinMode(){
   }
 
   let countdownTimer=null, myPicked=null, submitting=false, waitPollTimer=null;
-  function screenQuestion(room){
+  async function screenQuestion(room){
     if(countdownTimer)clearInterval(countdownTimer);
     if(waitPollTimer){clearInterval(waitPollTimer);waitPollTimer=null;}
     myPicked=null; submitting=false;
     const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
     const q=bank[room.qIndex];
+
+    const existing=await fbGet(`participants/${fbKey(room.sessionTag)}/${fbKey(clientId)}`);
+    if(existing && existing.answers && existing.answers['q'+room.qIndex]!==undefined){
+      myPicked=existing.answers['q'+room.qIndex];
+      debugLog(`Already answered q${room.qIndex} (resumed after refresh) — showing waiting state`);
+      showWaitingState();
+      return;
+    }
+
     body.innerHTML=`
       <div class="eyebrow" style="text-align:center;display:block">QUESTION ${room.qIndex+1} OF ${bank.length}</div>
       <div class="timerbig t-green" id="ptimer">00:20</div>
@@ -2069,34 +2109,133 @@ function startJoinMode(){
     <p style="text-align:center;font-size:12px;margin-top:10px">Waiting for the next question...</p>`;
   }
 
-  async function screenEnded(room){
-    if(waitPollTimer){clearInterval(waitPollTimer);waitPollTimer=null;}
-    const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
-    const r=await fbGet(`scores/${fbKey(room.sessionTag)}/${fbKey(clientId)}/${room.quizSet}`);
-    const pct=r?r.pct:null;
-    const partData=await fbGet(`participants/${fbKey(room.sessionTag)}/${fbKey(clientId)}`);
+  function computeParticipantResult(participant, bank){
     const cats=['Movement','Materials','Crystals','Water','Terminology','Selling'];
     const catBrk={}; cats.forEach(c=>catBrk[c]={correct:0,total:0});
-    if(partData&&partData.answers){
-      bank.forEach((q,i)=>{ catBrk[q.tag].total++; if(partData.answers['q'+i]===q.c) catBrk[q.tag].correct++; });
-    }
-    const withData=cats.map(c=>({c,pct:catBrk[c].total?Math.round(catBrk[c].correct/catBrk[c].total*100):null})).filter(x=>x.pct!==null);
-    let insight='';
-    if(withData.length){
-      withData.sort((a,b)=>b.pct-a.pct);
-      const strong=withData[0], weak=withData[withData.length-1];
-      if(pct!==null&&pct>=90) insight=`Excellent across the board — ${strong.c} was a particular strength.`;
-      else if(strong.c===weak.c) insight=`Consistent performance in ${strong.c}.`;
-      else insight=`Strong on ${strong.c} — focus next on ${weak.c}.`;
-    }
-    body.innerHTML=`<div class="logo"><div class="eyebrow">QUIZ COMPLETE</div><h2>${clientName}, you scored</h2></div>
-    <div class="big">${pct!==null?pct+'%':'—'}</div>
-    ${insight?`<div class="qcard" style="margin-top:16px"><div class="eyebrow">YOUR ANALYSIS</div><p style="color:var(--text);margin-top:6px">${insight}</p></div>`:''}
-    <p style="text-align:center;margin-top:14px">Nice work — head back to your trainer for the full room recap.</p>`;
+    let correct=0, incorrect=0, unanswered=0;
+    const times=[]; const perQ=[];
+    bank.forEach((q,i)=>{
+      const key='q'+i;
+      const meta=participant.meta&&participant.meta[key];
+      const sel=participant.answers&&participant.answers[key];
+      const answered=sel!==undefined;
+      const isCorrect=answered&&sel===q.c;
+      catBrk[q.tag].total++;
+      if(isCorrect){ correct++; catBrk[q.tag].correct++; }
+      else if(answered){ incorrect++; }
+      else { unanswered++; }
+      const rt=meta&&typeof meta.responseTimeMs==='number'?meta.responseTimeMs:null;
+      if(rt!==null) times.push(rt);
+      perQ.push({idx:i,q,answered,sel,isCorrect,rt});
+    });
+    const total=bank.length;
+    const pct=Math.round(correct/total*100);
+    const avgRt=times.length?Math.round(times.reduce((a,b)=>a+b,0)/times.length):null;
+    const fastest=times.length?Math.min(...times):null;
+    const slowest=times.length?Math.max(...times):null;
+    return {id:participant.id, name:participant.name||'Unnamed', correct, incorrect, unanswered, total, pct, avgRt, fastest, slowest, perQ, catBrk};
   }
 
-  screenName();
-  pollLoop();
+  function insightFor(catBrk,pct){
+    const withData=Object.entries(catBrk).filter(([c,s])=>s.total>0).map(([c,s])=>({c,pct:Math.round(s.correct/s.total*100)}));
+    if(!withData.length) return {strength:null,improve:null};
+    withData.sort((a,b)=>b.pct-a.pct);
+    return {strength:withData[0], improve:withData[withData.length-1]};
+  }
+
+  async function screenEnded(room){
+    if(waitPollTimer){clearInterval(waitPollTimer);waitPollTimer=null;}
+    try{ localStorage.removeItem('ilg_quiz_identity'); }catch(e){}
+    const bank=room.quizSet==='open'?OPEN_QUIZ:CLOSE_QUIZ;
+    body.innerHTML=`<p style="text-align:center;color:var(--muted)">Calculating your results…</p>`;
+
+    const myData=await fbGet(`participants/${fbKey(room.sessionTag)}/${fbKey(clientId)}`);
+    if(!myData){
+      debugLog('RESULTS LOAD FAILED — participant record missing');
+      body.innerHTML=`<p style="text-align:center;color:var(--danger)">We couldn't load your results.<br>Your answers have been saved.</p><button class="primary" type="button" id="retryResults">Retry</button>`;
+      body.querySelector('#retryResults').onclick=()=>screenEnded(room);
+      return;
+    }
+    const me=computeParticipantResult(myData,bank);
+    debugLog(`RESULTS LOADED — ${me.correct}/${me.total} correct, ${me.pct}%`);
+
+    const allParts=await listParticipants(room.sessionTag);
+    const board=allParts.map(p=>computeParticipantResult(p,bank)).sort((a,b)=> b.correct-a.correct || (a.avgRt||9e9)-(b.avgRt||9e9) );
+    const myRank=board.findIndex(r=>r.id===clientId)+1;
+    debugLog(`LEADERBOARD LOADED — ${board.length} participants`);
+    const {strength,improve}=insightFor(me.catBrk,me.pct);
+    debugLog('ANALYSIS LOADED');
+
+    let screenIdx=0;
+    const screens=['completion','results','analysis','leaderboard','recap'];
+
+    function renderScreen(){
+      const s=screens[screenIdx];
+      const navBtns=`<div class="navctl" style="justify-content:center;margin-top:20px">
+        ${screenIdx>0?`<button class="ctlbtn" type="button" id="rsPrev">← Back</button>`:''}
+        ${screenIdx<screens.length-1?`<button class="ctlbtn primary" type="button" id="rsNext">Continue →</button>`:''}
+      </div>`;
+
+      if(s==='completion'){
+        body.innerHTML=`<div class="logo"><div class="eyebrow">QUIZ COMPLETE</div><h2>Well done, ${clientName}</h2></div>
+        <p style="text-align:center">You've completed all ${me.total} questions.</p>
+        ${navBtns.replace('← Back','').replace('id="rsNext">Continue →','id="rsNext">View My Results →')}`;
+      } else if(s==='results'){
+        body.innerHTML=`<div class="logo"><div class="eyebrow">YOUR RESULT</div><h2>${me.pct}%</h2></div>
+        <div class="qcard">
+          <div class="propgrid">
+            <div><b>Correct</b>${me.correct} / ${me.total}</div>
+            <div><b>Incorrect</b>${me.incorrect}</div>
+            <div><b>Unanswered</b>${me.unanswered}</div>
+            <div><b>Rank</b>${myRank>0?`${myRank} of ${board.length}`:'—'}</div>
+            <div><b>Avg Response</b>${me.avgRt!==null?(me.avgRt/1000).toFixed(1)+'s':'—'}</div>
+            <div><b>Fastest</b>${me.fastest!==null?(me.fastest/1000).toFixed(1)+'s':'—'}</div>
+          </div>
+        </div>${navBtns}`;
+      } else if(s==='analysis'){
+        body.innerHTML=`<div class="logo"><div class="eyebrow">PERFORMANCE ANALYSIS</div><h2>By Category</h2></div>
+        <div class="qcard">
+          ${Object.entries(me.catBrk).filter(([c,x])=>x.total>0).map(([c,x])=>{
+            const p=Math.round(x.correct/x.total*100); const dot=p>=80?'g':p>=50?'y':'r';
+            return `<div class="bar show"><div class="fill" style="width:${p}%"></div><span class="lab"><span class="dot ${dot}"></span>${c}</span><span class="count">${p}%</span></div>`;
+          }).join('')}
+        </div>
+        ${strength?`<div class="qcard" style="margin-top:12px"><div class="eyebrow">STRONGEST AREA</div><p style="color:var(--text)">${strength.c} — ${strength.pct}%</p></div>`:''}
+        ${improve&&improve.c!==strength.c?`<div class="qcard" style="margin-top:12px"><div class="eyebrow">AREA TO IMPROVE</div><p style="color:var(--text)">${improve.c} — ${improve.pct}%</p></div>`:''}
+        ${navBtns}`;
+      } else if(s==='leaderboard'){
+        body.innerHTML=`<div class="logo"><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2></div>
+        <div class="qcard">
+          ${board.map((r,i)=>`<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);${r.id===clientId?'color:var(--amber);font-weight:700':''}">
+            <span>${i+1}. ${r.name}</span><span>${r.correct} pts · ${r.pct}%</span>
+          </div>`).join('')}
+        </div>${navBtns}`;
+      } else if(s==='recap'){
+        body.innerHTML=`<div class="logo"><div class="eyebrow">QUIZ RECAP</div><h2>Question by Question</h2></div>
+        ${me.perQ.map(pq=>`<div class="qcard" style="margin-bottom:10px">
+          <div class="eyebrow">QUESTION ${pq.idx+1}</div>
+          <p style="color:var(--text);font-weight:600">${pq.q.q}</p>
+          ${pq.answered
+            ?`<p>Your answer: <b style="color:${pq.isCorrect?'#22c55e':'var(--danger)'}">${pq.q.opts[pq.sel]}</b> ${pq.isCorrect?'✓':'✕'}</p>
+               ${!pq.isCorrect?`<p>Correct answer: <b style="color:#22c55e">${pq.q.opts[pq.q.c]}</b></p>`:''}
+               <p style="font-size:12px">${pq.q.why}</p>
+               <p style="font-size:11px;color:var(--muted)">Response time: ${pq.rt!==null?(pq.rt/1000).toFixed(1)+'s':'—'}</p>`
+            :`<p style="color:var(--muted)">No answer submitted.</p><p>Correct answer: <b style="color:#22c55e">${pq.q.opts[pq.q.c]}</b></p>`}
+        </div>`).join('')}
+        <p style="text-align:center;margin-top:10px">That's the full recap — nice work today.</p>`;
+      }
+      const prevBtn=document.getElementById('rsPrev'); if(prevBtn) prevBtn.onclick=()=>{screenIdx--;renderScreen();};
+      const nextBtn=document.getElementById('rsNext'); if(nextBtn) nextBtn.onclick=()=>{screenIdx++;renderScreen();};
+    }
+    renderScreen();
+  }
+
+  (async()=>{
+    body.innerHTML=`<p style="text-align:center;color:var(--muted)">Loading…</p>`;
+    const restored=await tryRestoreIdentity();
+    if(restored) screenWait(); else screenName();
+    pollLoop();
+  })();
 }
 
 /* ========================================================================
