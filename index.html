@@ -162,10 +162,6 @@ td{color:var(--text);}
 #lbCard .close{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);color:var(--muted);display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
 .lbRow{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;}
 .lbRow.me{color:var(--amber);font-weight:700;}
-#debugPanel{background:#000;border-top:1px solid var(--line);padding:8px 14px calc(8px + env(safe-area-inset-bottom));font-family:'JetBrains Mono','Courier New',monospace;font-size:10px;line-height:1.6;color:#5eead4;max-height:140px;overflow-y:auto;}
-#debugPanel .dbgtoggle{color:var(--amber);font-weight:700;cursor:pointer;display:block;margin-bottom:4px;-webkit-tap-highlight-color:transparent;}
-#debugPanel .dbgline{white-space:pre-wrap;word-break:break-word;border-bottom:1px solid #111;padding:2px 0;}
-#debugPanel.collapsed .dbglines{display:none;}
 #joinTopbar .dot{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);flex:0 0 auto;}
 #joinTopbar .name{font-family:'JetBrains Mono','Courier New',monospace;font-size:11px;color:var(--muted);letter-spacing:.06em;}
 #joinBody{flex:1;padding:24px 20px calc(40px + env(safe-area-inset-bottom));display:flex;flex-direction:column;}
@@ -1776,7 +1772,7 @@ function buildPresenterQuiz(quizSet,title){
           <button class="ctlbtn primary" id="btnStart">▶ Start Quiz</button>
           <button class="ctlbtn" id="btnPrevQ">← Prev</button>
           <button class="ctlbtn" id="btnNextQ">Next →</button>
-          <button class="ctlbtn" id="btnFinish">Finish &amp; Recap</button>
+          <button class="ctlbtn" id="btnFinish">🏆 Leaderboard</button>
         </div>
       </div>
     </div>
@@ -1823,7 +1819,7 @@ function buildPresenterQuiz(quizSet,title){
       <div id="barsWrap">
         ${q.opts.map((o,oi)=>`<div class="bar${isReveal&&oi===q.c?' correctbar':''} ${isReveal?'show':''}" data-oi="${oi}">
           <div class="fill" style="width:0%"></div>
-          <span class="lab">${isReveal&&oi===q.c?'<span class="tick" style="color:var(--amber)">✓ Correct</span> ':''}${String.fromCharCode(65+oi)} — ${o}</span>
+          <span class="lab">${isReveal?(oi===q.c?'<span class="tick" style="color:var(--amber)">✓ CORRECT</span> ':'<span class="tick" style="color:var(--danger)">✕ WRONG</span> '):''}${String.fromCharCode(65+oi)} — ${o}</span>
           <span class="count">${counts[oi]} response${counts[oi]===1?'':'s'}${total?' — '+Math.round(counts[oi]/total*100)+'%':''}</span>
         </div>`).join('')}
       </div>
@@ -1848,46 +1844,24 @@ function buildPresenterQuiz(quizSet,title){
   wrap.querySelector('#btnFinish').onclick=async()=>{
     const room=await getRoom(); room.phase='ended'; await setRoom(room);
     const parts=await listParticipants(room.sessionTag);
-    const cats=['Movement','Materials','Crystals','Water','Terminology','Selling'];
-    const catScore={};cats.forEach(c=>catScore[c]={correct:0,total:0});
-    let totalPct=0;
-    const people=[];
-    for(const p of parts){
-      let correct=0;
-      const personCat={}; cats.forEach(c=>personCat[c]={correct:0,total:0});
+    const scored=parts.map(p=>{
+      let correct=0, times=[];
       bank.forEach((q,i)=>{
-        const qKey='q'+i;
-        catScore[q.tag].total++; personCat[q.tag].total++;
-        if(p.answers&&p.answers[qKey]===q.c){ correct++; catScore[q.tag].correct++; personCat[q.tag].correct++; }
+        const key='q'+i;
+        if(p.answers&&p.answers[key]===q.c) correct++;
+        const rt=p.meta&&p.meta[key]&&typeof p.meta[key].responseTimeMs==='number'?p.meta[key].responseTimeMs:null;
+        if(rt!==null) times.push(rt);
       });
-      const pct=Math.round(correct/bank.length*100);
-      totalPct+=pct;
-      people.push({name:p.name||'Unnamed',pct,personCat});
-      await saveScore(room.sessionTag,p.id,quizSet,{name:p.name,pct});
-    }
-    people.sort((a,b)=>b.pct-a.pct);
-    function insightFor(personCat,pct){
-      const withData=cats.map(c=>({c,pct:personCat[c].total?Math.round(personCat[c].correct/personCat[c].total*100):null})).filter(x=>x.pct!==null);
-      if(!withData.length) return 'No answers submitted.';
-      withData.sort((a,b)=>b.pct-a.pct);
-      const strong=withData[0], weak=withData[withData.length-1];
-      if(pct>=90) return `Excellent across the board — ${strong.c} was a particular strength.`;
-      if(strong.c===weak.c) return `Consistent performance in ${strong.c}.`;
-      return `Strong on ${strong.c} — focus next on ${weak.c}.`;
-    }
-    const avg=parts.length?Math.round(totalPct/parts.length):0;
+      const avgRt=times.length?times.reduce((a,b)=>a+b,0)/times.length:9e9;
+      return {name:p.name||'Unnamed', correct, pct:Math.round(correct/bank.length*100), avgRt};
+    }).sort((a,b)=> b.correct-a.correct || a.avgRt-b.avgRt);
+    const top10=scored.slice(0,10);
     bodyEl.innerHTML=`<div class="card">
-      <h3>Recap — Room Average: ${avg}%</h3>
-      ${cats.map(c=>{ const s=catScore[c];const pct=s.total?Math.round(s.correct/s.total*100):0; const dot=pct>=80?'g':pct>=50?'y':'r';
-        return `<div class="bar show"><div class="fill" style="width:${pct}%"></div><span class="lab"><span class="dot ${dot}"></span>${c}</span><span class="count">${pct}%</span></div>`;
-      }).join('')}
-      <p style="margin-top:10px;font-size:12px;color:var(--muted)">${parts.length} participants scored — from actual submitted answers.</p>
-    </div>
-    <div class="card" style="margin-top:16px">
-      <h3>Leaderboard &amp; Analysis</h3>
-      <table><thead><tr><th>Rank</th><th>Name</th><th>Score</th><th>Analysis</th></tr></thead>
-      <tbody>${people.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name}</td><td>${p.pct}%</td><td style="font-size:12px">${insightFor(p.personCat,p.pct)}</td></tr>`).join('')}</tbody>
+      <h3>🏆 Leaderboard — Top ${top10.length}</h3>
+      <table><thead><tr><th>Rank</th><th>Name</th><th>Score</th><th>Accuracy</th></tr></thead>
+      <tbody>${top10.map((p,i)=>`<tr><td>${i+1}</td><td>${p.name}</td><td>${p.correct} pts</td><td>${p.pct}%</td></tr>`).join('')}</tbody>
       </table>
+      <p style="margin-top:10px;font-size:12px;color:var(--muted)">${scored.length} participants scored — from actual submitted answers. Each participant also sees this same ranking on their own phone.</p>
     </div>`;
   };
   refresh();
@@ -1904,22 +1878,11 @@ function startJoinMode(){
   document.getElementById('stage').style.display='none';
   const root=document.getElementById('joinRoot');
   root.style.display='flex';
-  root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span><button type="button" id="lbOpenBtn" class="lbTopBtn">🏆 Leaderboard</button></div><div id="joinBody"></div><div id="debugPanel"><span class="dbgtoggle" id="dbgToggle">▾ DEBUG LOG (tap to hide)</span><div class="dbglines" id="dbgLines"></div></div><div id="lbOverlay"><div id="lbCard"><span class="close" id="lbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2><div id="lbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>`;
+  root.innerHTML=`<div id="joinTopbar"><span class="dot"></span><span class="name">ILG ACADEMY · LIVE QUIZ</span><button type="button" id="lbOpenBtn" class="lbTopBtn">🏆 Leaderboard</button></div><div id="joinBody"></div><div id="lbOverlay"><div id="lbCard"><span class="close" id="lbCloseBtn">✕</span><div class="eyebrow">LEADERBOARD</div><h2>Room Ranking</h2><div id="lbBody"><p style="text-align:center;color:var(--muted)">Loading…</p></div></div></div>`;
   const body=document.getElementById('joinBody');
   clientId='c'+Math.random().toString(36).slice(2,10);
 
-  const dbgLines=document.getElementById('dbgLines');
-  function debugLog(msg){
-    const line=el(`<div class="dbgline">${new Date().toLocaleTimeString()} — ${msg}</div>`);
-    dbgLines.appendChild(line);
-    while(dbgLines.children.length>25) dbgLines.removeChild(dbgLines.firstChild);
-    dbgLines.parentElement.scrollTop=dbgLines.parentElement.scrollHeight;
-  }
-  document.getElementById('dbgToggle').onclick=()=>{
-    const p=document.getElementById('debugPanel');
-    p.classList.toggle('collapsed');
-    document.getElementById('dbgToggle').textContent=p.classList.contains('collapsed')?'▸ DEBUG LOG (tap to show)':'▾ DEBUG LOG (tap to hide)';
-  };
+  function debugLog(msg){ console.log('[ILG QUIZ]', new Date().toLocaleTimeString(), '—', msg); }
   debugLog(`Session started. clientId=${clientId}. UA=${navigator.userAgent.slice(0,60)}`);
 
   let netFailCount=0;
@@ -1936,7 +1899,18 @@ function startJoinMode(){
 
   function renderBoardRows(board){
     if(!board.length) return '<p style="text-align:center;color:var(--muted)">No scores yet.</p>';
-    return board.map((r,i)=>`<div class="lbRow${r.id===clientId?' me':''}"><span>${i+1}. ${r.name}</span><span>${r.correct} pts · ${r.pct}%</span></div>`).join('');
+    const top10=board.slice(0,10);
+    const myIdx=board.findIndex(r=>r.id===clientId);
+    let html=top10.map((r,i)=>`<div class="lbRow${r.id===clientId?' me':''}"><span>${i+1}. ${r.name}</span><span>${r.correct} pts · ${r.pct}%</span></div>`).join('');
+    if(myIdx>=10){
+      const me=board[myIdx];
+      html+=`<div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line);text-align:center">
+        <div class="eyebrow">YOUR POSITION</div>
+        <div style="font-family:'JetBrains Mono','Courier New',monospace;font-size:22px;color:var(--amber);font-weight:700">#${myIdx+1}</div>
+        <div style="color:var(--text)">${me.correct} points</div>
+      </div>`;
+    }
+    return html;
   }
 
   async function openLeaderboard(){
